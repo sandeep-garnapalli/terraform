@@ -1,0 +1,52 @@
+pipeline {
+    agent any
+
+    environment {
+        APP_SERVER = "65.2.78.234"
+        APP_USER   = "devops"
+        SSH_KEY    = credentials('app-ssh-key')
+        GIT_REPO   = "https://github.com/Amruth-B/assemment-addressbook.git"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'master', url: "${GIT_REPO}"
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+
+        stage('Setup Tomcat') {
+            steps {
+                sh '''
+                ssh -i $SSH_KEY -o StrictHostKeyChecking=no $APP_USER@$APP_SERVER "
+                    if [ ! -d /opt/tomcat9 ]; then
+                        sudo apt-get update -y
+                        sudo apt-get install -y openjdk-11-jdk wget
+                        wget https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.75/bin/apache-tomcat-9.0.75.tar.gz
+                        sudo mkdir -p /opt/tomcat9
+                        sudo tar xzvf apache-tomcat-9.0.75.tar.gz -C /opt/tomcat9 --strip-components=1
+                        sudo chown -R $APP_USER:$APP_USER /opt/tomcat9
+                        chmod +x /opt/tomcat9/bin/*.sh
+                    fi
+                "
+                '''
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh '''
+                ssh -i $SSH_KEY -o StrictHostKeyChecking=no $APP_USER@$APP_SERVER "/opt/tomcat9/bin/shutdown.sh || true"
+                scp -i $SSH_KEY -o StrictHostKeyChecking=no target/*.war $APP_USER@$APP_SERVER:/opt/tomcat9/webapps/addressbook.war
+                ssh -i $SSH_KEY -o StrictHostKeyChecking=no $APP_USER@$APP_SERVER "/opt/tomcat9/bin/startup.sh"
+                '''
+            }
+        }
+    }
+}
